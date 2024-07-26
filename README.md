@@ -1,4 +1,4 @@
-![Figure_2](https://github.com/user-attachments/assets/4887177a-1ea2-4e42-8796-1f3ccd4d0189)# Process_Optimizers
+# Process_Optimizers
 
 Scripts written by Ryan Aday to optimize LBPF prints.
 
@@ -52,3 +52,15 @@ Example Output:
     Suggested new target for Temperature: 20.25751161336211
     The process for Humidity is out of control at points: [95]
     Suggested new target for Humidity: 49.34864012128788
+
+## Good Links:
+ - https://answers.opencv.org/question/212287/fit-ellipse-with-most-points-on-contour-instead-of-least-squares/
+ - https://docs.opencv.org/4.x/d4/d13/tutorial_py_filtering.html
+ - https://www.geeksforgeeks.org/python-opencv-canny-function/
+ - https://cvexplained.wordpress.com/2020/05/18/morphological-operations/
+ - https://docs.opencv.org/4.x/d3/dc0/group__imgproc__shape.html#ga0012a5fdaea70b8a9970165d98722b4c
+ - https://www.educba.com/opencv-approxpolydp/
+ - https://medium.com/@isinsuarici/hough-circle-transform-parameter-tuning-with-examples-6b63478377c9
+ - https://www.sciencedirect.com/science/article/pii/S221486041830188X
+ - https://www.sciencedirect.com/science/article/abs/pii/S0272884222011713
+ - https://www.nature.com/articles/s41598-024-63288-1
