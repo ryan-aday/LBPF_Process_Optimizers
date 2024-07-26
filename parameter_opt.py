@@ -82,7 +82,7 @@ constraints = [
 ]
 
 # Optimization
-result = minimize(objective, initial_params, bounds=bounds, constraints=constraints, method='L-BFGS-B')
+result = minimize(objective, initial_params, bounds=bounds, constraints=constraints, method='SLSQP')
 
 # Optimal parameters
 optimal_params = result.x
