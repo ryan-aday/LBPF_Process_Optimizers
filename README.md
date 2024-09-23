@@ -1,6 +1,6 @@
 # LBPF_Process_Optimizers
 
-Scripts written by Ryan Aday to optimize LBPF prints.
+Python scripts written by Ryan Aday- preprocess optimizers for various steps in the LBPF process.
 
 ## Before you run:
 
