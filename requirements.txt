@@ -4,3 +4,9 @@ scipy
 matplotlib
 statsmodels
 seaborn
+trimesh
+shapely
+networkx
+rtree
+tqdm
+python-fcl
