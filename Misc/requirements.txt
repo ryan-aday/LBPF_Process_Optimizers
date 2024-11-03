@@ -1,0 +1,6 @@
+numpy
+scipy
+numpy-stl
+scikit-learn
+easygui
+pymeshlab
