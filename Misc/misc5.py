@@ -11,11 +11,14 @@ def load_mesh(file_path):
         print(f"Error loading mesh: {e}")
         sys.exit(1)
 
-def decimate_mesh(mesh, target_faces=10000, ratio=0.7):
+def decimate_mesh(mesh, ratio=0.5):
     mesh.fill_holes()
     initial_face_count = len(mesh.faces)
     decimated_mesh = mesh.simplify_quadric_decimation(int(len(mesh.faces) * ratio))
+    #decimated_mesh = mesh.simplify_vertex_clustering()
+
     print(f"Decimation reduced from {initial_face_count} to {len(decimated_mesh.faces)} faces.")
+    decimated_mesh.process(validate=True)
     return decimated_mesh
 
 '''
@@ -65,10 +68,13 @@ def clean_and_export_mesh(mesh, output_path):
 
 '''
 
-def mod_mesh(mesh, output_path, iterations=2, featuredeg=2.0):
+def mod_mesh(mesh, output_path, iterations=2, featuredeg=15.5):
     ms = pymeshlab.MeshSet()
     ms.add_mesh(pymeshlab.Mesh(mesh.vertices, mesh.faces))
     
+
+    #ms.meshing_repair_non_manifold_edges()
+    #ms.meshing_repair_non_manifold_vertices()
     # Fill holes and remove duplicate triangles
     ms.meshing_close_holes(maxholesize=100)
     print("Closed holes.")
@@ -79,11 +85,13 @@ def mod_mesh(mesh, output_path, iterations=2, featuredeg=2.0):
 
     
     # Laplacian smoothing and isotropic remeshing
-    #ms.apply_filter("meshing_isotropic_explicit_remeshing", adaptive=True, featuredeg=featuredeg, smoothflag=True, iterations=iterations)
-    ms.apply_filter("generate_surface_reconstruction_vcg", smoothnum=2, geodesic=3, simplification=False, normalsmooth=4)
-
-    print(f"Applied {iterations} iterations of Laplacian smoothing and isotropic remeshing.")
-
+    ms.apply_filter("meshing_isotropic_explicit_remeshing", adaptive=True, featuredeg=featuredeg, smoothflag=False, iterations=2)
+    #ms.apply_filter("generate_surface_reconstruction_vcg", smoothnum=4, widenum=5, geodesic=2.5, simplification=, normalsmooth=5)
+    #ms.apply_filter("generate_surface_reconstruction_screened_poisson", visiblelayer=True, cgdepth=2, scale=1.2, samplespernode=5.0)
+    #ms.apply_filter("compute_iso_parametrization", stopcriteria='Area + Angle')
+    #print(f"Applied {iterations} iterations of Laplacian smoothing and isotropic remeshing.")
+    #ms.apply_filter("generate_iso_parametrization_remeshing")
+    #ms.apply_filter("generate_resampled_uniform_mesh")
 
     try:
         ms.save_current_mesh(output_path)
@@ -103,9 +111,9 @@ def mod_mesh(mesh, output_path, iterations=2, featuredeg=2.0):
     ''' 
 
 
-def main(input_file, output_file, target_faces=10000, ratio=0.7, iterations=2, featuredeg=1.0):
+def main(input_file, output_file, ratio=0.4, iterations=2, featuredeg=2.0):
     mesh = load_mesh(input_file)
-    decimated_mesh = decimate_mesh(mesh, target_faces, ratio)
+    decimated_mesh = decimate_mesh(mesh, ratio)
     
     # Smooth and make the mesh isometric
     #smoothed_mesh = smooth_and_make_isometric(decimated_mesh, iterations, featuredeg)
@@ -116,5 +124,4 @@ def main(input_file, output_file, target_faces=10000, ratio=0.7, iterations=2, f
 if __name__ == "__main__":
     input_file = fileopenbox(title='Select input file.', default='*', filetypes=["*.stl", "*.obj"])
     output_file = "output_mesh.stl"
-    target_faces = 10000
-    main(input_file, output_file, target_faces)
+    main(input_file, output_file)
