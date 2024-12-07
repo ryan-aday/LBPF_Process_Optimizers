@@ -1,20 +1,52 @@
 import sys
 import vtk
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QPushButton, QFileDialog, QWidget, QTextEdit
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QWidget, QFrame, QLabel
+)
+from PyQt5.QtCore import Qt
 
 
-class STLViewer(QMainWindow):
+class CuraLikeSTLManipulator(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Interactive Multi-STL Manipulator")
-        self.setGeometry(100, 100, 1000, 800)
+        self.setWindowTitle("Cura-Like STL Manipulator")
+        self.setGeometry(100, 100, 1200, 800)
 
         self.widget = QWidget(self)
         self.setCentralWidget(self.widget)
 
-        self.layout = QVBoxLayout(self.widget)
+        # Main Layout
+        self.layout = QHBoxLayout(self.widget)
 
-        # VTK Renderer
+        # Left Control Panel
+        self.control_panel = QVBoxLayout()
+        self.control_panel.setAlignment(Qt.AlignTop)
+
+        # Add control buttons
+        self.load_button = QPushButton("Load STL")
+        self.load_button.clicked.connect(self.load_stl)
+
+        self.reset_button = QPushButton("Reset Transformations")
+        self.reset_button.clicked.connect(self.reset_transformations)
+
+        self.save_button = QPushButton("Save Transformations")
+        self.save_button.clicked.connect(self.save_transformations)
+
+        self.control_panel.addWidget(QLabel("Controls"))
+        self.control_panel.addWidget(self.load_button)
+        self.control_panel.addWidget(self.reset_button)
+        self.control_panel.addWidget(self.save_button)
+
+        # Add separator line
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        self.control_panel.addWidget(line)
+
+        # Add control panel to layout
+        self.layout.addLayout(self.control_panel)
+
+        # VTK 3D Viewer
         self.vtk_widget = vtk.vtkRenderWindow()
         self.interactor = vtk.vtkRenderWindowInteractor()
         self.interactor.SetRenderWindow(self.vtk_widget)
@@ -22,53 +54,36 @@ class STLViewer(QMainWindow):
         self.renderer = vtk.vtkRenderer()
         self.vtk_widget.AddRenderer(self.renderer)
 
-        # Real-time transformation logging
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
+        # Add build plate
+        self.add_build_plate()
 
-        self.transformations = {}  # Store transformations by actor
-        self.stl_actors = []  # Keep track of STL actors
-        self.build_plate_actor = None  # Store the build plate actor
+        # Set camera position
+        self.setup_camera()
 
-        # Add buttons
-        self.load_button = QPushButton("Load STL", self)
-        self.load_button.clicked.connect(self.load_stl)
-
-        self.save_transform_button = QPushButton("Save Transformations", self)
-        self.save_transform_button.clicked.connect(self.save_transformations)
-
-        # Add everything to layout
-        self.layout.addWidget(self.load_button)
-        self.layout.addWidget(self.save_transform_button)
-        self.layout.addWidget(self.log_text)
-
-        # Link vtk render window to the PyQt layout
+        # Add VTK widget to layout
         self.vtk_layout = QVBoxLayout()
         self.vtk_frame = QWidget()
         self.vtk_frame.setLayout(self.vtk_layout)
-
-        self.layout.addWidget(self.vtk_frame)
         self.vtk_layout.addWidget(QWidget.createWindowContainer(self.vtk_widget))
+        self.layout.addLayout(self.vtk_layout)
 
-        # Add build plate to renderer
-        self.add_build_plate()
+        # Actor management
+        self.stl_actors = []  # Keep track of loaded STL actors
+        self.transformations = {}  # Store transformations for each actor
+        self.selected_actor = None  # Currently selected actor
 
-        # Selection and interaction
-        self.selected_actor = None
-        self.start_pos = None
-        self.dragging = False
-        self.rotating = False
+        # Add selection mechanism
         self.init_selection()
 
-        # Enable mouse interactivity
+        # Initialize VTK interactor
         self.interactor.Initialize()
 
     def add_build_plate(self):
-        """Add a fixed 600x600x6 build plate to the scene."""
+        """Add a fixed 600x600x5 build plate to the scene."""
         plate = vtk.vtkCubeSource()
         plate.SetXLength(600)
         plate.SetYLength(600)
-        plate.SetZLength(6)
+        plate.SetZLength(5)
 
         mapper = vtk.vtkPolyDataMapper()
         mapper.SetInputConnection(plate.GetOutputPort())
@@ -76,68 +91,56 @@ class STLViewer(QMainWindow):
         actor = vtk.vtkActor()
         actor.SetMapper(mapper)
         actor.GetProperty().SetColor(0.7, 0.7, 0.7)  # Light gray color
-        actor.SetPosition(0, 0, -3)  # Center the plate
+        actor.SetPosition(0, 0, -2.5)
 
+        # Add plate to the renderer (non-selectable)
         self.renderer.AddActor(actor)
         self.build_plate_actor = actor
 
+    def setup_camera(self):
+        """Configure the camera to look down at the build plate."""
+        camera = vtk.vtkCamera()
+        camera.SetPosition(0, 0, 800)  # Position above the build plate
+        camera.SetFocalPoint(0, 0, 0)  # Look at the center of the build plate
+        camera.SetViewUp(0, 1, 0)  # Align the camera's "up" direction
+        self.renderer.SetActiveCamera(camera)
+        self.renderer.ResetCameraClippingRange()
+
     def init_selection(self):
-        """Initialize selection mechanism."""
+        """Initialize selection and interaction mechanism."""
         self.selector = vtk.vtkPropPicker()
 
         def on_left_button_press(obj, event):
-            self.start_pos = self.interactor.GetEventPosition()
-            self.selector.Pick(self.start_pos[0], self.start_pos[1], 0, self.renderer)
+            click_pos = self.interactor.GetEventPosition()
+            self.selector.Pick(click_pos[0], click_pos[1], 0, self.renderer)
             actor = self.selector.GetActor()
 
-            # Only allow selection of STL actors, not the build plate
-            if actor in self.stl_actors:
+            if actor in self.stl_actors:  # Only allow selection of STL actors
                 self.selected_actor = actor
-                self.log_text.append("Selected new part.")
-            elif actor == self.build_plate_actor:
-                self.selected_actor = None
-                self.log_text.append("Cannot move the build plate.")
+                print("Selected actor:", actor)
             else:
                 self.selected_actor = None
 
-            self.dragging = True
-
-        def on_left_button_release(obj, event):
-            self.dragging = False
-
-        def on_right_button_press(obj, event):
-            self.start_pos = self.interactor.GetEventPosition()
-            self.rotating = True
-
-        def on_right_button_release(obj, event):
-            self.rotating = False
-
         def on_mouse_move(obj, event):
-            if self.selected_actor and self.start_pos:
-                end_pos = self.interactor.GetEventPosition()
-                delta_x = end_pos[0] - self.start_pos[0]
-                delta_y = end_pos[1] - self.start_pos[1]
-                self.start_pos = end_pos
+            if self.selected_actor:
+                mouse_pos = self.interactor.GetEventPosition()
+                delta_x, delta_y = mouse_pos[0] - self.start_pos[0], mouse_pos[1] - self.start_pos[1]
+                self.start_pos = mouse_pos
 
-                transform = self.transformations.get(self.selected_actor)
-                if self.dragging:
-                    transform.Translate(delta_x / 100.0, -delta_y / 100.0, 0)
-                elif self.rotating:
-                    transform.RotateWXYZ(delta_x, 0, 1, 0)
-                    transform.RotateWXYZ(delta_y, 1, 0, 0)
-
+                transform = self.transformations[self.selected_actor]
+                transform.Translate(delta_x / 100.0, -delta_y / 100.0, 0)
                 self.selected_actor.SetUserTransform(transform)
                 self.vtk_widget.Render()
-                self.log_transformation(self.selected_actor, transform)
+
+        def on_mouse_release(obj, event):
+            self.start_pos = None
 
         self.interactor.AddObserver("LeftButtonPressEvent", on_left_button_press)
-        self.interactor.AddObserver("LeftButtonReleaseEvent", on_left_button_release)
-        self.interactor.AddObserver("RightButtonPressEvent", on_right_button_press)
-        self.interactor.AddObserver("RightButtonReleaseEvent", on_right_button_release)
         self.interactor.AddObserver("MouseMoveEvent", on_mouse_move)
+        self.interactor.AddObserver("LeftButtonReleaseEvent", on_mouse_release)
 
     def load_stl(self):
-        # Select STL file(s)
+        """Load STL file(s)."""
         options = QFileDialog.Options()
         files, _ = QFileDialog.getOpenFileNames(
             self, "Open STL Files", "", "STL Files (*.stl);;All Files (*)", options=options
@@ -145,7 +148,7 @@ class STLViewer(QMainWindow):
 
         if files:
             for stl_file in files:
-                # Read STL
+                # Load STL
                 reader = vtk.vtkSTLReader()
                 reader.SetFileName(stl_file)
 
@@ -156,69 +159,44 @@ class STLViewer(QMainWindow):
                 actor = vtk.vtkActor()
                 actor.SetMapper(mapper)
 
-                # Apply default transformation (center at origin)
+                # Apply default transformation
                 transform = vtk.vtkTransform()
-                transform.Translate(0, 0, 0)  # Center at origin
                 actor.SetUserTransform(transform)
 
-                # Add bounding box visualization
-                self.add_bounding_box(actor)
-
-                # Add to renderer
+                # Add to scene
                 self.renderer.AddActor(actor)
                 self.renderer.ResetCamera()
                 self.vtk_widget.Render()
 
-                # Save transformation data and track the actor
-                self.transformations[actor] = transform
+                # Track actor and transformation
                 self.stl_actors.append(actor)
+                self.transformations[actor] = transform
 
-                # Log file loaded
-                self.log_text.append(f"Loaded STL: {stl_file}")
-
-    def add_bounding_box(self, actor):
-        """Add a bounding box around the STL actor."""
-        bounds = actor.GetBounds()
-        box = vtk.vtkCubeSource()
-        box.SetBounds(bounds)
-
-        mapper = vtk.vtkPolyDataMapper()
-        mapper.SetInputConnection(box.GetOutputPort())
-
-        box_actor = vtk.vtkActor()
-        box_actor.SetMapper(mapper)
-        box_actor.GetProperty().SetColor(1, 0, 0)  # Red bounding box
-        box_actor.GetProperty().SetLineWidth(2)
-        box_actor.GetProperty().SetRepresentationToWireframe()
-
-        self.renderer.AddActor(box_actor)
-
-    def log_transformation(self, actor, transform):
-        """Log transformation changes in real-time."""
-        matrix = transform.GetMatrix()
-        position = actor.GetPosition()
-        rotation = [matrix.GetElement(0, 0), matrix.GetElement(1, 1), matrix.GetElement(2, 2)]
-        self.log_text.append(f"Actor: {actor}\nPosition: {position}, Rotation: {rotation}")
+    def reset_transformations(self):
+        """Reset transformations for the selected actor."""
+        if self.selected_actor:
+            transform = vtk.vtkTransform()
+            self.selected_actor.SetUserTransform(transform)
+            self.transformations[self.selected_actor] = transform
+            self.vtk_widget.Render()
 
     def save_transformations(self):
-        """Save transformations for all STL files."""
+        """Save transformations for all actors to a file."""
         save_file, _ = QFileDialog.getSaveFileName(
             self, "Save Transformations", "", "Text Files (*.txt);;All Files (*)"
         )
 
         if save_file:
-            with open(save_file, 'w') as f:
+            with open(save_file, "w") as file:
                 for actor, transform in self.transformations.items():
                     matrix = transform.GetMatrix()
                     matrix_values = [matrix.GetElement(i, j) for i in range(4) for j in range(4)]
-                    f.write(f"Actor: {actor}\n")
-                    f.write(" ".join(map(str, matrix_values)) + "\n")
-
-            self.log_text.append("Transformations saved!")
+                    file.write(f"Actor {actor}:\n")
+                    file.write(" ".join(map(str, matrix_values)) + "\n")
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = STLViewer()
+    window = CuraLikeSTLManipulator()
     window.show()
     sys.exit(app.exec_())
