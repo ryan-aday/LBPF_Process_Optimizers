@@ -1,6 +1,5 @@
 import sys
 import vtk
-import numpy as np
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QPushButton, QFileDialog, QWidget, QTextEdit
 
 
@@ -28,6 +27,8 @@ class STLViewer(QMainWindow):
         self.log_text.setReadOnly(True)
 
         self.transformations = {}  # Store transformations by actor
+        self.stl_actors = []  # Keep track of STL actors
+        self.build_plate_actor = None  # Store the build plate actor
 
         # Add buttons
         self.load_button = QPushButton("Load STL", self)
@@ -78,6 +79,7 @@ class STLViewer(QMainWindow):
         actor.SetPosition(0, 0, -3)  # Center the plate
 
         self.renderer.AddActor(actor)
+        self.build_plate_actor = actor
 
     def init_selection(self):
         """Initialize selection mechanism."""
@@ -88,10 +90,14 @@ class STLViewer(QMainWindow):
             self.selector.Pick(self.start_pos[0], self.start_pos[1], 0, self.renderer)
             actor = self.selector.GetActor()
 
-            if actor and actor != self.selected_actor:
+            # Only allow selection of STL actors, not the build plate
+            if actor in self.stl_actors:
                 self.selected_actor = actor
                 self.log_text.append("Selected new part.")
-            elif actor is None:
+            elif actor == self.build_plate_actor:
+                self.selected_actor = None
+                self.log_text.append("Cannot move the build plate.")
+            else:
                 self.selected_actor = None
 
             self.dragging = True
@@ -163,8 +169,9 @@ class STLViewer(QMainWindow):
                 self.renderer.ResetCamera()
                 self.vtk_widget.Render()
 
-                # Save transformation data
+                # Save transformation data and track the actor
                 self.transformations[actor] = transform
+                self.stl_actors.append(actor)
 
                 # Log file loaded
                 self.log_text.append(f"Loaded STL: {stl_file}")
