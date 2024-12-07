@@ -1,0 +1,178 @@
+import sys
+import vtk
+import numpy as np
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QPushButton, QFileDialog, QWidget, QTextEdit
+
+
+class STLViewer(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Multi-STL Manipulator")
+        self.setGeometry(100, 100, 1000, 800)
+
+        self.widget = QWidget(self)
+        self.setCentralWidget(self.widget)
+
+        self.layout = QVBoxLayout(self.widget)
+
+        # VTK Renderer
+        self.vtk_widget = vtk.vtkRenderWindow()
+        self.interactor = vtk.vtkRenderWindowInteractor()
+        self.interactor.SetRenderWindow(self.vtk_widget)
+
+        self.renderer = vtk.vtkRenderer()
+        self.vtk_widget.AddRenderer(self.renderer)
+
+        # Real-time transformation logging
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+
+        self.transformations = []  # Store transformations for STL files
+
+        # Add buttons
+        self.load_button = QPushButton("Load STL", self)
+        self.load_button.clicked.connect(self.load_stl)
+
+        self.save_transform_button = QPushButton("Save Transformations", self)
+        self.save_transform_button.clicked.connect(self.save_transformations)
+
+        # Add everything to layout
+        self.layout.addWidget(self.load_button)
+        self.layout.addWidget(self.save_transform_button)
+        self.layout.addWidget(self.log_text)
+
+        # Link vtk render window to the PyQt layout
+        self.vtk_layout = QVBoxLayout()
+        self.vtk_frame = QWidget()
+        self.vtk_frame.setLayout(self.vtk_layout)
+
+        self.layout.addWidget(self.vtk_frame)
+        self.vtk_layout.addWidget(QWidget.createWindowContainer(self.vtk_widget))
+
+        # Add build plate to renderer
+        self.add_build_plate()
+
+        # Enable mouse interactivity
+        self.interactor.Initialize()
+
+    def add_build_plate(self):
+        """Add a fixed 600x600x6 build plate to the scene."""
+        plate = vtk.vtkCubeSource()
+        plate.SetXLength(600)
+        plate.SetYLength(600)
+        plate.SetZLength(6)
+
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(plate.GetOutputPort())
+
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        actor.GetProperty().SetColor(0.7, 0.7, 0.7)  # Light gray color
+        actor.SetPosition(0, 0, -3)  # Center the plate
+
+        self.renderer.AddActor(actor)
+
+    def load_stl(self):
+        # Select STL file(s) and optionally a transformation matrix
+        options = QFileDialog.Options()
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Open STL Files", "", "STL Files (*.stl);;All Files (*)", options=options
+        )
+
+        if files:
+            for stl_file in files:
+                # Optional transformation file lookup
+                transform_matrix = self.get_transform_matrix_for_stl(stl_file)
+
+                # Read STL
+                reader = vtk.vtkSTLReader()
+                reader.SetFileName(stl_file)
+
+                # Map STL to actor
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputConnection(reader.GetOutputPort())
+
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+
+                # Apply transformation matrix or default to origin
+                transform = vtk.vtkTransform()
+                if transform_matrix is not None:
+                    self.apply_numpy_matrix_to_vtk_transform(transform, transform_matrix)
+                else:
+                    transform.Translate(0, 0, 0)  # Center at origin
+
+                actor.SetUserTransform(transform)
+
+                # Add bounding box visualization
+                self.add_bounding_box(actor)
+
+                # Add to renderer
+                self.renderer.AddActor(actor)
+                self.renderer.ResetCamera()
+                self.vtk_widget.Render()
+
+                # Save transformation data
+                self.transformations.append({
+                    "file": stl_file,
+                    "transform": transform
+                })
+
+                # Log file loaded
+                self.log_text.append(f"Loaded STL: {stl_file}")
+
+    def get_transform_matrix_for_stl(self, stl_file):
+        """Optional: Lookup a transformation matrix for the STL file."""
+        # Replace this with actual logic to fetch the transformation matrix
+        # For example, use a dictionary or JSON lookup keyed by `stl_file`.
+        # Returning `None` for simplicity in this template.
+        return None
+
+    def apply_numpy_matrix_to_vtk_transform(self, vtk_transform, numpy_matrix):
+        """Apply a 4x4 numpy transformation matrix to a vtkTransform."""
+        matrix = vtk.vtkMatrix4x4()
+        for i in range(4):
+            for j in range(4):
+                matrix.SetElement(i, j, numpy_matrix[i, j])
+        vtk_transform.SetMatrix(matrix)
+
+    def add_bounding_box(self, actor):
+        """Add a bounding box around the STL actor."""
+        bounds = actor.GetBounds()
+        box = vtk.vtkCubeSource()
+        box.SetBounds(bounds)
+
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(box.GetOutputPort())
+
+        box_actor = vtk.vtkActor()
+        box_actor.SetMapper(mapper)
+        box_actor.GetProperty().SetColor(1, 0, 0)  # Red bounding box
+        box_actor.GetProperty().SetLineWidth(2)
+        box_actor.GetProperty().SetRepresentationToWireframe()
+
+        self.renderer.AddActor(box_actor)
+
+    def save_transformations(self):
+        """Save transformations for all STL files."""
+        save_file, _ = QFileDialog.getSaveFileName(
+            self, "Save Transformations", "", "Text Files (*.txt);;All Files (*)"
+        )
+
+        if save_file:
+            with open(save_file, 'w') as f:
+                for transform_data in self.transformations:
+                    transform = transform_data["transform"]
+                    matrix = transform.GetMatrix()
+                    matrix_values = [matrix.GetElement(i, j) for i in range(4) for j in range(4)]
+                    f.write(f"{transform_data['file']}:\n")
+                    f.write(" ".join(map(str, matrix_values)) + "\n")
+
+            self.log_text.append("Transformations saved!")
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = STLViewer()
+    window.show()
+    sys.exit(app.exec_())
