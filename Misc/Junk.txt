@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QPushButton,
 class STLViewer(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Multi-STL Manipulator")
+        self.setWindowTitle("Interactive Multi-STL Manipulator")
         self.setGeometry(100, 100, 1000, 800)
 
         self.widget = QWidget(self)
@@ -27,7 +27,7 @@ class STLViewer(QMainWindow):
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
 
-        self.transformations = []  # Store transformations for STL files
+        self.transformations = {}  # Store transformations by actor
 
         # Add buttons
         self.load_button = QPushButton("Load STL", self)
@@ -52,6 +52,13 @@ class STLViewer(QMainWindow):
         # Add build plate to renderer
         self.add_build_plate()
 
+        # Selection and interaction
+        self.selected_actor = None
+        self.start_pos = None
+        self.dragging = False
+        self.rotating = False
+        self.init_selection()
+
         # Enable mouse interactivity
         self.interactor.Initialize()
 
@@ -72,8 +79,59 @@ class STLViewer(QMainWindow):
 
         self.renderer.AddActor(actor)
 
+    def init_selection(self):
+        """Initialize selection mechanism."""
+        self.selector = vtk.vtkPropPicker()
+
+        def on_left_button_press(obj, event):
+            self.start_pos = self.interactor.GetEventPosition()
+            self.selector.Pick(self.start_pos[0], self.start_pos[1], 0, self.renderer)
+            actor = self.selector.GetActor()
+
+            if actor and actor != self.selected_actor:
+                self.selected_actor = actor
+                self.log_text.append("Selected new part.")
+            elif actor is None:
+                self.selected_actor = None
+
+            self.dragging = True
+
+        def on_left_button_release(obj, event):
+            self.dragging = False
+
+        def on_right_button_press(obj, event):
+            self.start_pos = self.interactor.GetEventPosition()
+            self.rotating = True
+
+        def on_right_button_release(obj, event):
+            self.rotating = False
+
+        def on_mouse_move(obj, event):
+            if self.selected_actor and self.start_pos:
+                end_pos = self.interactor.GetEventPosition()
+                delta_x = end_pos[0] - self.start_pos[0]
+                delta_y = end_pos[1] - self.start_pos[1]
+                self.start_pos = end_pos
+
+                transform = self.transformations.get(self.selected_actor)
+                if self.dragging:
+                    transform.Translate(delta_x / 100.0, -delta_y / 100.0, 0)
+                elif self.rotating:
+                    transform.RotateWXYZ(delta_x, 0, 1, 0)
+                    transform.RotateWXYZ(delta_y, 1, 0, 0)
+
+                self.selected_actor.SetUserTransform(transform)
+                self.vtk_widget.Render()
+                self.log_transformation(self.selected_actor, transform)
+
+        self.interactor.AddObserver("LeftButtonPressEvent", on_left_button_press)
+        self.interactor.AddObserver("LeftButtonReleaseEvent", on_left_button_release)
+        self.interactor.AddObserver("RightButtonPressEvent", on_right_button_press)
+        self.interactor.AddObserver("RightButtonReleaseEvent", on_right_button_release)
+        self.interactor.AddObserver("MouseMoveEvent", on_mouse_move)
+
     def load_stl(self):
-        # Select STL file(s) and optionally a transformation matrix
+        # Select STL file(s)
         options = QFileDialog.Options()
         files, _ = QFileDialog.getOpenFileNames(
             self, "Open STL Files", "", "STL Files (*.stl);;All Files (*)", options=options
@@ -81,9 +139,6 @@ class STLViewer(QMainWindow):
 
         if files:
             for stl_file in files:
-                # Optional transformation file lookup
-                transform_matrix = self.get_transform_matrix_for_stl(stl_file)
-
                 # Read STL
                 reader = vtk.vtkSTLReader()
                 reader.SetFileName(stl_file)
@@ -95,13 +150,9 @@ class STLViewer(QMainWindow):
                 actor = vtk.vtkActor()
                 actor.SetMapper(mapper)
 
-                # Apply transformation matrix or default to origin
+                # Apply default transformation (center at origin)
                 transform = vtk.vtkTransform()
-                if transform_matrix is not None:
-                    self.apply_numpy_matrix_to_vtk_transform(transform, transform_matrix)
-                else:
-                    transform.Translate(0, 0, 0)  # Center at origin
-
+                transform.Translate(0, 0, 0)  # Center at origin
                 actor.SetUserTransform(transform)
 
                 # Add bounding box visualization
@@ -113,28 +164,10 @@ class STLViewer(QMainWindow):
                 self.vtk_widget.Render()
 
                 # Save transformation data
-                self.transformations.append({
-                    "file": stl_file,
-                    "transform": transform
-                })
+                self.transformations[actor] = transform
 
                 # Log file loaded
                 self.log_text.append(f"Loaded STL: {stl_file}")
-
-    def get_transform_matrix_for_stl(self, stl_file):
-        """Optional: Lookup a transformation matrix for the STL file."""
-        # Replace this with actual logic to fetch the transformation matrix
-        # For example, use a dictionary or JSON lookup keyed by `stl_file`.
-        # Returning `None` for simplicity in this template.
-        return None
-
-    def apply_numpy_matrix_to_vtk_transform(self, vtk_transform, numpy_matrix):
-        """Apply a 4x4 numpy transformation matrix to a vtkTransform."""
-        matrix = vtk.vtkMatrix4x4()
-        for i in range(4):
-            for j in range(4):
-                matrix.SetElement(i, j, numpy_matrix[i, j])
-        vtk_transform.SetMatrix(matrix)
 
     def add_bounding_box(self, actor):
         """Add a bounding box around the STL actor."""
@@ -153,6 +186,13 @@ class STLViewer(QMainWindow):
 
         self.renderer.AddActor(box_actor)
 
+    def log_transformation(self, actor, transform):
+        """Log transformation changes in real-time."""
+        matrix = transform.GetMatrix()
+        position = actor.GetPosition()
+        rotation = [matrix.GetElement(0, 0), matrix.GetElement(1, 1), matrix.GetElement(2, 2)]
+        self.log_text.append(f"Actor: {actor}\nPosition: {position}, Rotation: {rotation}")
+
     def save_transformations(self):
         """Save transformations for all STL files."""
         save_file, _ = QFileDialog.getSaveFileName(
@@ -161,11 +201,10 @@ class STLViewer(QMainWindow):
 
         if save_file:
             with open(save_file, 'w') as f:
-                for transform_data in self.transformations:
-                    transform = transform_data["transform"]
+                for actor, transform in self.transformations.items():
                     matrix = transform.GetMatrix()
                     matrix_values = [matrix.GetElement(i, j) for i in range(4) for j in range(4)]
-                    f.write(f"{transform_data['file']}:\n")
+                    f.write(f"Actor: {actor}\n")
                     f.write(" ".join(map(str, matrix_values)) + "\n")
 
             self.log_text.append("Transformations saved!")
