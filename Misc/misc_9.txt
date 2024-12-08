@@ -1,0 +1,148 @@
+import open3d as o3d
+import numpy as np
+import trimesh
+import os
+
+
+# https://www.open3d.org/html/python_api/open3d.geometry.TriangleMesh.html
+# https://hhoppe.com/poissonrecon.pdf
+#https://stackoverflow.com/questions/66595268/how-to-convert-3d-cloud-datapoints-to-mesh-using-python
+# https://www.sandia.gov/files/cubit/15.4/help_manual/WebHelp/mesh_generation/mesh_quality_assessment/find_intersecting_mesh.htm
+# https://www.open3d.org/html/python_api/open3d.t.geometry.PointCloud.html
+# https://hhoppe.com/poissonrecon.pdf
+# https://www.sandia.gov/files/cubit/15.4/help_manual/WebHelp/mesh_generation/mesh_quality_assessment/find_intersecting_mesh.htm
+# http://open3d.org/docs/latest/python_api/open3d.visualization.draw_geometries.html
+# https://github.com/isl-org/Open3D/issues/2988
+# https://www.open3d.org/docs/latest/tutorial/Advanced/surface_reconstruction.html
+# https://github.com/isl-org/Open3D/discussions/3913
+
+def stl_to_point_cloud(stl_file):
+    """
+    Convert an STL mesh into a point cloud by uniformly sampling points on the mesh surface.
+    """
+    
+    mesh = trimesh.load(stl_file)
+    mesh.fill_holes()
+    mesh.fix_normals()
+    trimesh_file_name = stl_file.split('.')[0]
+    mesh.export(trimesh_file_name + "_trimesh.stl")
+    
+    # Load the STL mesh
+    mesh = o3d.io.read_triangle_mesh(stl_file)
+    #mesh = o3d.t.geometry.TriangleMesh.from_legacy(mesh).fill_holes().to_legacy()
+    
+    if not mesh.has_triangles():
+        raise ValueError("The input mesh has no triangles.")
+    
+    # Sample points from the mesh
+    point_cloud = mesh.sample_points_uniformly(number_of_points=len(mesh.vertices))
+    return point_cloud
+
+def reconstruct_mesh_from_point_cloud(point_cloud, depth=9):
+    """
+    Reconstruct a mesh from a point cloud using Poisson surface reconstruction.
+    """
+    
+    '''
+    pcd = np.random.rand(1000000, 3) * 20  # Example deviated point cloud
+    point_cloud = o3d.geometry.PointCloud()
+    point_cloud.points = o3d.utility.Vector3dVector(pcd)
+    '''
+    
+    point_cloud.remove_duplicated_points()
+    point_cloud.remove_non_finite_points()
+    #point_cloud.hidden_point_removal()
+    
+    print(f"Point cloud reduced to {len(point_cloud.points)} points.")
+    
+    try:
+        # Estimate normals for the point cloud
+        #point_cloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        point_cloud.compute_convex_hull()
+        point_cloud.estimate_normals()
+
+        #point_cloud.orient_normals_towards_camera_location(point_cloud.get_center())
+        
+        #point_cloud.normals = o3d.utility.Vector3dVector( - np.asarray(point_cloud.normals))
+        
+        point_cloud.orient_normals_consistent_tangent_plane(k=10)
+
+        #print(point_cloud.normals)
+
+        #print(np.asarray(point_cloud.points))
+
+
+        # Perform Poisson reconstruction
+        mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+            point_cloud, depth=depth, linear_fit=False, scale=1.35
+        )
+
+        mesh.compute_vertex_normals().compute_triangle_normals()
+
+        '''
+        mesh.remove_duplicated_triangles()
+        mesh.remove_duplicated_vertices()
+        mesh.remove_non_manifold_edges()
+        mesh.merge_close_vertices(eps=0.08)
+        print(mesh.is_watertight())
+        '''
+        
+        mesh.compute_vertex_normals().compute_triangle_normals()
+
+        # Check if mesh is valid
+        if mesh is None or len(mesh.vertices) == 0:
+            raise ValueError("Poisson reconstruction failed to create a valid mesh.")
+
+        '''
+        # Remove low-density triangles to clean the mesh
+        #densities = np.asarray(densities)
+        #vertices_to_keep = densities > np.quantile(densities, 0.01)  # Keep 99% of vertices
+        #mesh = mesh.remove_vertices_by_mask(vertices_to_keep == False)
+
+        if len(mesh.vertices) == 0:
+            raise ValueError("Mesh cleaning removed all vertices. Adjust density thresholds.")
+        '''
+        
+        return mesh
+
+    except Exception as e:
+        print(f"Error during Poisson reconstruction: {e}")
+        return None
+
+def save_mesh(mesh, output_file):
+    """
+    Save the reconstructed mesh to a file.
+    """
+    if mesh is None or len(mesh.vertices) == 0:
+        raise ValueError("Cannot save an empty or None mesh.")
+    o3d.io.write_triangle_mesh(output_file, mesh)
+
+# Main Workflow
+if __name__ == "__main__":
+    input_stl_file = "CE3E3V2_xyzrgb_dragon.stl"  # Replace with the path to your STL file
+    input_file_name = input_stl_file.split('.')[0]
+    
+    output_stl_file = os.getcwd() + "\\" + input_file_name + "_reconstructed_mesh.stl"  # Path to save the reconstructed STL file
+
+    try:
+        # Convert STL to point cloud
+        print("Converting STL to point cloud...")
+        point_cloud = stl_to_point_cloud(input_stl_file)
+        print(f"Point cloud has {len(point_cloud.points)} points.")
+
+        # Reconstruct mesh from point cloud
+        print("Reconstructing mesh from point cloud...")
+        reconstructed_mesh = reconstruct_mesh_from_point_cloud(point_cloud)
+
+        # Save the reconstructed mesh
+        print(f"Saving reconstructed mesh to {output_stl_file}...")
+        save_mesh(reconstructed_mesh, output_stl_file)
+
+        print("Process completed successfully!")
+
+        o3d.visualization.draw_geometries([point_cloud, reconstructed_mesh], window_name="Point Cloud Visualization", point_show_normal=False, mesh_show_wireframe=True)
+
+
+
+    except Exception as error:
+        print(f"An error occurred: {error}")
