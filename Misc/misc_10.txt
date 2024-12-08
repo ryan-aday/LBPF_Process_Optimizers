@@ -1,0 +1,56 @@
+import open3d as o3d
+import numpy as np
+from matplotlib.colors import Normalize
+from matplotlib.cm import get_cmap
+
+def visualize_deviations_o3d(source_mesh_path, deviated_point_cloud, threshold=1):
+    """
+    Visualize source mesh and deviated point cloud using Open3D with gradient coloring and highlight outliers.
+
+    Parameters:
+    - source_mesh_path: str, path to the source mesh file.
+    - deviated_point_cloud: np.ndarray, shape (N, 3), the deviated point cloud data.
+    - threshold: float, user-defined threshold for outlier zones (default=1).
+    """
+    # Load the source mesh
+    source_mesh = o3d.io.read_triangle_mesh(source_mesh_path)
+    source_mesh.compute_vertex_normals()
+    source_mesh.paint_uniform_color([0.8, 0.8, 0.8])  # Light gray for transparency effect
+
+    # Calculate the deviation magnitudes for the point cloud
+    deviations = np.linalg.norm(deviated_point_cloud, axis=1)
+    
+    # Normalize deviations for coloring
+    norm = Normalize(vmin=deviations.min(), vmax=deviations.max())
+    colormap = get_cmap('viridis')
+    colors = colormap(norm(deviations))[:, :3]
+    
+    # Identify outliers
+    outliers = deviations > threshold
+
+    # Create Open3D Point Cloud for the deviated points
+    deviated_pcd = o3d.geometry.PointCloud()
+    deviated_pcd.points = o3d.utility.Vector3dVector(deviated_point_cloud)
+    deviated_pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    # Create Open3D Sphere geometries for outliers
+    outlier_spheres = []
+    for point in deviated_point_cloud[outliers]:
+        sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
+        sphere.translate(point)
+        sphere.paint_uniform_color([1, 0, 0])  # Red color for outliers
+        outlier_spheres.append(sphere)
+
+    # Combine all geometries into one scene
+    geometries = [source_mesh, deviated_pcd] + outlier_spheres
+
+    # Visualize
+    o3d.visualization.draw_geometries(geometries, 
+                                      window_name="Source Mesh and Deviated Point Cloud", 
+                                      mesh_show_wireframe=False, 
+                                      mesh_show_back_face=True)
+
+# Example usage
+source_mesh_path = "Knob.stl"  # Replace with your mesh file path
+deviated_point_cloud = np.random.rand(1000, 3) * 20  # Example deviated point cloud
+visualize_deviations_o3d(source_mesh_path, deviated_point_cloud)
